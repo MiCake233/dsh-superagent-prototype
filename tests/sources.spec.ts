@@ -1195,7 +1195,7 @@ describe('observing the GitHub repository', () => {
     h.store.saveSettings({ ...h.store.settings(), sources: { ...h.store.settings().sources, github: { enabled: true, config } } })
   /** GitHub as the repository's lists and its default branch answer; a request with the ETag of an unchanged list answers 304. */
   function repository(h: ReturnType<typeof host>, answers: { issues?: unknown[]; comments?: unknown[]; reviewComments?: unknown[];
-    branch?: { sha: string; checks: unknown[] } }) {
+    branch?: { name?: string; sha: string; checks: unknown[] } }) {
     const calls: string[][] = []
     vi.spyOn(h.commands, 'run').mockImplementation(async (_program, args) => {
       calls.push(args)
@@ -1206,8 +1206,9 @@ describe('observing the GitHub repository', () => {
       if (bare === 'issues') return listed(answers.issues)
       if (bare === 'issues/comments') return listed(answers.comments)
       if (bare === 'pulls/comments') return listed(answers.reviewComments)
-      if (bare === '') return JSON.stringify({ default_branch: 'main' })
-      if (bare === 'commits/main') return JSON.stringify({ sha: answers.branch!.sha })
+      const branchName = answers.branch && 'name' in answers.branch ? answers.branch.name : 'main'
+      if (bare === '') return JSON.stringify({ default_branch: branchName })
+      if (bare === `commits/${branchName}`) return JSON.stringify({ sha: answers.branch!.sha })
       if (bare.endsWith('/check-runs')) return JSON.stringify([{ check_runs: answers.branch!.checks }])
       return JSON.stringify(args.includes('--slurp') ? [[]] : [])
     })
@@ -1303,6 +1304,16 @@ describe('observing the GitHub repository', () => {
     // The horizon, on the hour.
     expect(Date.now() - POLL_HORIZON_MS - since).toBeGreaterThanOrEqual(0)
     expect(Date.now() - POLL_HORIZON_MS - since).toBeLessThan(3_600_000)
+    h.store.close()
+  })
+  it('reads the default branch\'s commit when the branch name contains a slash', async () => {
+    const h = host()
+    observe(h, { observeCi: true })
+    h.store.set('github-since', at(-24))
+    const calls = repository(h, { branch: { name: 'release/1.0', sha: 'abc1234', checks: [] } })
+    await pollRound(h)
+    const commit = calls.find(args => args[1]?.includes('/commits/'))
+    expect(commit?.[1]).toBe('repos/acme/widgets/commits/release/1.0')
     h.store.close()
   })
   it('starts the default branch\'s CI afresh when the default branch is renamed, without a Trigger', async () => {

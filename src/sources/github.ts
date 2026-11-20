@@ -247,11 +247,17 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
   // The ETag belongs to this request, which the next round repeats only while the cursor stays unchanged.
   ctx.state.set(name, { since: next, started, ...etag && next === since ? { etag } : {} })
 }
+/** Commit API path for a branch or tag. Slashes stay separators so `release/1.0` is not one percent-encoded segment. */
+function commitPath(ref: string): string {
+  const parts = ref.split('/')
+  if (!ref || parts.some(part => part === '' || part === '.' || part === '..')) throw new Error('Invalid Git ref')
+  return `commits/${parts.map(part => encodeURIComponent(part)).join('/')}`
+}
 /** Polls default-branch CI checks, emitting a trigger only when the set of failing checks changes after the initial baseline. */
 async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   const commands = ctx.commands.withSignal(round.signal)
   const { default_branch: branch } = await commands.api(z.looseObject({ default_branch: z.string() }), '')
-  const head = await commands.api(z.looseObject({ sha: z.string() }), `commits/${encodeURIComponent(branch)}`)
+  const head = await commands.api(z.looseObject({ sha: z.string() }), commitPath(branch))
   const snapshot = await pullChecks(commands, head.sha, round.tally)
   const previous = ctx.state.get(KV.github.branchCi)
   // The first observation after switching on or renaming the default branch establishes the baseline.

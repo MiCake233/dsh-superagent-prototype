@@ -56,7 +56,23 @@ describe('account-isolated operations', () => {
   it('uses Feishu bot identity and one idempotency key on retries', async () => {
     const commands = new Commands(() => deployment, {}, new AbortController().signal); const run = vi.spyOn(commands,'run').mockResolvedValue('{"ok":true,"data":{}}')
     await send(commands, { ...reply, channel: feishuChannel('oc_1', 'om_1') })
-    expect(run.mock.calls[0]![1]).toEqual(expect.arrayContaining(['--as','bot','--idempotency-key','stable-operation','--message-id','om_1']))
+    expect(run.mock.calls[0]![1]).toEqual(expect.arrayContaining(['--as','bot','--idempotency-key','stable-operation','--message-id','om_1','--markdown','Done']))
+  })
+  it('does not let Feishu reply text become a lark-cli file or stdin read', async () => {
+    const commands = new Commands(() => deployment, {}, new AbortController().signal)
+    const run = vi.spyOn(commands, 'run').mockResolvedValue('{"ok":true,"data":{}}')
+    const markdown = async (text: string) => {
+      run.mockClear()
+      await send(commands, { ...reply, text, channel: feishuChannel('oc_1', 'om_1') })
+      const args = run.mock.calls[0]![1] as string[]
+      const flag = args.includes('--content') ? '--content' : '--markdown'
+      return args[args.indexOf(flag) + 1]
+    }
+    // lark-cli reads `@path` as a file and `-` as stdin; `@@` is its escape for a literal `@`.
+    expect(await markdown('@alice the patch is in')).toBe('@@alice the patch is in')
+    expect(await markdown('@@already escaped')).toBe('@@@already escaped')
+    expect(await markdown('-')).toBe(JSON.stringify({ text: '-' }))
+    expect(await markdown('- item one')).toBe('- item one')
   })
 })
 
@@ -135,7 +151,8 @@ describe('GitHub calls', () => {
     expect(await value.api(z.looseObject({ number: z.number() }), 'issues/12')).toEqual({ number: 12, title: 'Login fails', extra: true })
     expect(run).toHaveBeenLastCalledWith('/path/agent-gh', ['api', `repos/${REPOSITORY}/issues/12`])
     await expect(value.api(z.looseObject({ number: z.string() }), 'issues/12')).rejects.toThrow()
-    for (const path of ['../other/repo/issues', 'issues/../../x', '/repos/x/y', 'https://api.github.com/x']) {
+    for (const path of ['../other/repo/issues', 'issues/../../x', '/repos/x/y', 'https://api.github.com/x',
+      '%2e%2e/%2e%2e/other/repo', 'issues/%2e%2e/comments', 'foo%2F..%2F..%2Fother']) {
       await expect(value.api(z.unknown(), path)).rejects.toThrow('restricted to the configured repository')
     }
     expect(run).toHaveBeenCalledTimes(2)

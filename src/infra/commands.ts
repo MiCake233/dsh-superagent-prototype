@@ -92,8 +92,11 @@ export class Commands {
     return validItems(item, pages.flat(), tally)
   }
   private path(path: string): string {
-    const outside = /^\/|^[a-z]+:|(^|\/)\.\.?(\/|\?|$)/i.test(path)
-    if (outside) throw new Error('GitHub calls are restricted to the configured repository')
+    // `gh api` sends this string as the request path. GitHub percent-decodes it before routing, so `%2e%2e` is `..`.
+    let decoded: string
+    try { decoded = decodeURIComponent(path) } catch { throw new Error('GitHub calls are restricted to the configured repository') }
+    const outside = /^\/|^[a-z]+:|(^|\/)\.\.?(\/|\?|$)/i
+    if (outside.test(path) || outside.test(decoded)) throw new Error('GitHub calls are restricted to the configured repository')
     return path ? `repos/${this.repository}/${path}` : `repos/${this.repository}`
   }
   /**
